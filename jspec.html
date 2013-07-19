@@ -1,0 +1,128 @@
+<!doctype html>
+<html>
+	<head>
+		<style>
+body {
+	font-family: "Droid Mono", Consolas, monospace;
+	font-size: 14px;
+}
+td {
+	vertical-align: top;
+}
+del {
+	color: #800;
+	text-decoration: none;
+}
+ins {
+	color: #080;
+	text-decoration: none;
+}
+
+
+		</style>
+		<script src="jquery-1.8.1.min.js"></script>
+		<script src="jspec.js"></script>
+	</head>
+	<body>
+		<div id="jspec">
+			<table>
+				<tr>
+					<td>
+						<canvas id="jspec-canvas" width="352" height="296"></canvas>
+					</td>
+					<td>
+						<div>
+							<input id="jspec-button-reset" type="button" value="Reset"/>
+							<input id="jspec-button-run" type="button" value="Run"/>
+							<input id="jspec-button-step" type="button" value="Step"/>
+							<input id="jspec-button-stepn" type="button" value="Step n="/>
+							<input id="jspec-input-stepcount" type="text" value="638998" size="5"/>
+						</div>
+						<div>
+							<input id="jspec-button-fuzz" type="button" value="Fuzz"/>
+							mode=
+							<input id="jspec-input-fuzz-mode" type="text" value="0" size="2"/>								
+							seed=
+							<input id="jspec-input-fuzz-seed" type="text" value="0" size="5"/>	
+							steps=
+							<input id="jspec-input-fuzz-steps" type="text" value="100" size="5"/>
+						</div>						
+						<div>
+							<input id="jspec-button-screenshot" type="button" value="Upload Screenshot"/>
+							<span id="jspec-upload-status"></span>
+						</div>
+						<div>
+							break on: <input id="jspec-input-breakpoint" type="text" value="PC=0xFFFF" size="8"/>
+						</div>
+						<div>
+							ROM:
+							<select id="jspec-input-rom">
+								<option value="48.rom">48</option>
+								<option value="48noints.rom">48noints</option>
+							</select>
+							<input id="jspec-button-load-rom" type="button" value="Load ROM"/>
+						</div>
+						<div>
+							SNA:
+							<select id="jspec-input-sna">
+								<option value="sna/z80tests.sna">z80tests</option>
+								<option value="sna/batty.sna">batty</option>
+								<option value="sna/manic.sna">manic</option>
+								<option value="sna/test.sna">test</option>
+								<option value="sna/sprite.sna">sprite</option>
+								<option value="sna/key-rom.sna">key-rom</option>
+								<option value="sna/key-raw.sna">key-raw</option>
+								<option value="sna/zexall.sna">zexall</option>
+							</select>
+							<input id="jspec-button-load-sna" type="button" value="Load SNA"/>
+						</div>
+						<div>
+							TZX:
+							<select id="jspec-input-tzx">
+								<option value="batty.tzx">batty</option>
+							</select>
+							<input id="jspec-button-load-tzx" type="button" value="Load TZX"/>
+						</div>
+						<table>
+							<tr>
+								<td>PC</td><td id="jspec-r-pc">----</td>
+								<td>SP</td><td id="jspec-r-sp">----</td>
+								<td>IFF1</td><td id="jspec-r-iff1">--</td>
+							</tr>
+							<tr>
+								<td>AF</td><td id="jspec-r-af">----</td>
+								<td>AF'</td><td id="jspec-r-af2">----</td>
+								<td>IFF2</td><td id="jspec-r-iff2">--</td>
+							</tr>
+							<tr>
+								<td>BC</td><td id="jspec-r-bc">----</td>
+								<td>BC'</td><td id="jspec-r-bc2">----</td>
+								<td>IM</td><td id="jspec-r-im">--</td>
+							</tr>
+							<tr>
+								<td>DE</td><td id="jspec-r-de">----</td>
+								<td>DE'</td><td id="jspec-r-de2">----</td>
+								<td>ULA</td><td id="jspec-r-ula">--</td>
+							</tr>
+							<tr>
+								<td>HL</td><td id="jspec-r-hl">----</td>
+								<td>HL'</td><td id="jspec-r-hl2">----</td>
+								<td>IRQp</td><td id="jspec-r-toirq">--</td>
+							</tr>
+							<tr>
+								<td>IX</td><td id="jspec-r-ix">----</td>
+								<td>IY</td><td id="jspec-r-iy">----</td>
+								<td>IRQn</td><td id="jspec-r-irqn">--</td>
+							</tr>
+							<tr>
+								<td>I</td><td id="jspec-r-i">--</td>
+								<td>R</td><td id="jspec-r-r">--</td>
+							</tr>
+						</table>
+					</td>
+				</tr>
+			</table>
+		</div>
+		<div id="fuzz-output"></div>
+	</body>
+</html>
