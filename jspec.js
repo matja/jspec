@@ -34,6 +34,24 @@ references:
 	BUG: 689538 ticks : 0DEC : SUB $18 (A=19)
 	0d63: what is this routine?
 	BUG: after pressing Q for "PLOT", BC value at PO-ST-E (0AF0) continues decrementing past 1720
+
+
+z80tests.sna:
+0x8935 start of test
+0x8954 end of test
+0x8963 compare result
+
+
+buggy instructions :
+ld r,a
+
+add hl,hl (hl=0x0f10)-> f becomes b8 should be 98
+bit 0,(iy+2) (0x00) -> f becomes 0x55 0101 0101 should be 0x5d 0101 1101
+and n -> disasm
+adc a,0 (a=0xff) -> f becomes 0x01 should be 0x51
+
+
+ld a,0x10 ; rst 0x10 ; break at 2215 -> fuse differs
 */
 
 var g_test_rom = false;
@@ -229,13 +247,13 @@ SpectrumIO.prototype = {
 				return kp.state;
 			}
 		}
-	
+
 		return 0xff;
 	}
-	,write: function(address, value) {	
+	,write: function(address, value) {
 		if (address == 0xfe) {
 			this.machine.setBorder(value & 0x7);
-		}	
+		}
 	}
 };
 
@@ -290,7 +308,7 @@ FuzzRandomMemory.prototype = {
 	,swrite16: function(address, value) {
 		this.swrite8(address, value & 0xff);
 		this.swrite8(address+1, value >> 8);
-	}	
+	}
 };
 
 FuzzRandomIO.prototype = {
@@ -318,7 +336,7 @@ FuzzRandomIO.prototype = {
 				,value
 			)
 		);
-	}	
+	}
 };
 
 var FuzzMemory = function() {
@@ -449,7 +467,7 @@ FuzzIO.prototype = {
 				,value
 			)
 		);
-	}	
+	}
 };
 
 SpectrumMemory.prototype = {
@@ -685,17 +703,17 @@ Spectrum.prototype = {
 		}
 
 		$('#jspec-button-fuzz').on('click', function(){
-			var mode = $('#jspec-input-fuzz-mode').val();		
+			var mode = $('#jspec-input-fuzz-mode').val();
 			var seed = $('#jspec-input-fuzz-seed').val();
 			var steps = $('#jspec-input-fuzz-steps').val();
-			
-			if (mode == 1) {			
+
+			if (mode == 1) {
 				self.memory = new FuzzMemory();
 				self.io = new FuzzIO();
 				self.cpu.mmu = self.memory;
 				self.cpu.io = self.io;
 			}
-	
+
 
 			self.cpu.fuzz(mode, seed, steps);
 			self.cpu.mmu = new SpectrumMemory();
@@ -862,14 +880,9 @@ Spectrum.prototype = {
 			}
 		}
 
-		return false;		
+		console.log('unhandled keycode', keycode);
 
-		var s = "";
-		for (var kpi in this.keyboard_ports) {
-			var kp = this.keyboard_ports[kpi];
-			s += sprintf("%04x=%02x ", kp.port, kp.state);
-		}
-		//console.log(s);
+		return false;
 	}
 	,setDebug: function(value) {
 		this.debug = value;
@@ -1123,7 +1136,7 @@ Spectrum.prototype = {
 
 var Z80 = function() {
 	var self = this;
-	
+
 	self.zymosis_compatible = true;
 
 	self.reset();
@@ -1346,7 +1359,7 @@ var Z80 = function() {
 			switch (i) {
 				case 4 : return self.readHY();
 				case 5 : return self.readLY();
-				case 6 : {					
+				case 6 : {
 					self.displacement_skip = 1;
 					var displacement = u2s8(self.mmu.read8(self.readPC()+2));
 					return self.mmu.read8(self.readIY() + displacement);
@@ -1474,29 +1487,32 @@ var Z80 = function() {
 	};
 
 	self.base_adc8 = function(d, s) {
-		var r = s + d + !!self.getFC();
+		// FIXME: adc a,0 (c=1 a=0xff) -> f becomes 0x01 should be 0x51
+		var c = !!self.getFC();
+		var r = s + d + c;
 		if (r & 0x80) { self.setFS(); } else { self.resetFS(); }
-		if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
+		if ((r & 0xff) == 0) { self.setFZ(); } else { self.resetFZ(); }
 		if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
-		if (((s & 0xf) + (d & 0xf)) > 15) { self.setFH(); } else { self.resetFH(); }
-		if (r & 0x08) { self.setF3(); } else { self.resetF3(); }		
+		if (((s & 0xf) + (d & 0xf) + c) >= 16) { self.setFH(); } else { self.resetFH(); }
+		if (r & 0x08) { self.setF3(); } else { self.resetF3(); }
 		if ((s ^ r) & (d ^ r) & 0x80) { self.setFV(); } else { self.resetFV(); }
-		self.resetFN();		
-		if (r >= 0x100) { self.setFC(); } else { self.resetFC(); }		
+		self.resetFN();
+		if (r >= 0x100) { self.setFC(); } else { self.resetFC(); }
 		return r;
 	};
 
-	self.base_sbc8 = function(d, s) {	
-		var r = (d - s - !!self.getFC()) & 0xffff;		
-		if (r & 0x80) { self.setFS(); } else { self.resetFS(); }		
-		if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
-		if (r & 0x20) { self.setF5(); } else { self.resetF5(); }		
-		if (((d&0x0f) - (s&0xf) - !!self.getFC()) < 0) { self.setFH(); } else { self.resetFH(); }
+	self.base_sbc8 = function(d, s) {
+		var c = !!self.getFC();
+		var r = (d - s - c) & 0xffff;
+		if (r & 0x80) { self.setFS(); } else { self.resetFS(); }
+		if ((r & 0xff) == 0) { self.setFZ(); } else { self.resetFZ(); }
+		if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
+		if (((d & 0x0f) - (s & 0xf) - c) < 0) { self.setFH(); } else { self.resetFH(); }
 		if (r & 0x08) { self.setF3(); } else { self.resetF3(); }
 		if ((s ^ d) & (d ^ r) & 0x80) { self.setFV(); } else { self.resetFV(); }
-		self.setFN();		
-		if (r > 0xff) { self.setFC(); } else { self.resetFC(); }				
-		return r & 0xff;	
+		self.setFN();
+		if (r >= 0x100) { self.setFC(); } else { self.resetFC(); }
+		return r & 0xff;
 	};
 
 	self.base_and8 = function(d, s) {
@@ -1514,7 +1530,7 @@ var Z80 = function() {
 
 	self.base_xor8 = function(d, s) {
 		var r = d ^ s;
-		if (r & 0x80) { self.setFS(); } else { self.resetFS(); }		
+		if (r & 0x80) { self.setFS(); } else { self.resetFS(); }
 		if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
 		if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
 		self.resetFH();
@@ -1527,7 +1543,7 @@ var Z80 = function() {
 
 	self.base_or8 = function(d, s) {
 		var r = d | s;
-		if (r & 0x80) { self.setFS(); } else { self.resetFS(); }		
+		if (r & 0x80) { self.setFS(); } else { self.resetFS(); }
 		if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
 		if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
 		self.resetFH();
@@ -1541,13 +1557,13 @@ var Z80 = function() {
 	self.base_cp8 = function(d, s) {
 		var r = (d - s) & 0xff;
 		if (r & 0x80) { self.setFS(); } else { self.resetFS(); }
-		if (r == 0) { self.setFZ(); } else { self.resetFZ(); }		
-		if (s & 0x20) { self.setF5(); } else { self.resetF5(); }	
-		if ((s&0xf) > (d&0xf)) { self.setFH(); } else { self.resetFH(); }					
-		if (s & 0x08) { self.setF3(); } else { self.resetF3(); }				
-		if ((s ^ d) & (d ^ r) & 0x80) { self.setFV(); } else { self.resetFV(); }				
-		self.setFN();		
-		if (s > d) { self.setFC(); } else { self.resetFC(); }		
+		if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
+		if (s & 0x20) { self.setF5(); } else { self.resetF5(); }
+		if ((s&0xf) > (d&0xf)) { self.setFH(); } else { self.resetFH(); }
+		if (s & 0x08) { self.setF3(); } else { self.resetF3(); }
+		if ((s ^ d) & (d ^ r) & 0x80) { self.setFV(); } else { self.resetFV(); }
+		self.setFN();
+		if (s > d) { self.setFC(); } else { self.resetFC(); }
 	};
 
 	self.instructions = {
@@ -1581,37 +1597,38 @@ var Z80 = function() {
 			,c: 4
 			,s: 0
 			,exec: function(i) {
-				this.immediate_address = this.readPC() + 2;	
+				this.immediate_address = this.readPC() + 2;
 				var o = self.mmu.read8(this.readPC()+1);
 				var d = self.opcode_descriptions.ed[o];
-				if (d.handler === undefined) {					
+				if (d.handler === undefined) {
 					console.error("unhandled ED opcode ", o.toString(16), d);
 					debugger;
-				}				
+				}
 				d.handler.call(self, d);
-				this.r_add = 2;		
-				return d;				
+				this.r_add = 2;
+				return d;
 			}
 		}
 		,ed_unimplemented: { disasm: "ED UNIMP", c:4, s:2
 			,exec: function(i) {
-						
+				console.error("unhandled ED opcode ", i);
+				debugger;
 			}
-		}		
+		}
 		,dd_prefix: {
 			disasm: "DD PREFIX"
 			,c: 4
 			,s: 1
 			,exec: function(i) {
-				this.immediate_address = this.readPC() + 2;			
+				this.immediate_address = this.readPC() + 2;
 				var o = self.mmu.read8(this.readPC()+1);
 				var d = self.opcode_descriptions.dd[o];
 				if (d.handler === undefined) {
 					console.error(o.toString(16), d);
 					debugger;
 				}
-				this.prefix_bytes = 1;				
-				var nd = d.handler.call(self, d);	
+				this.prefix_bytes = 1;
+				var nd = d.handler.call(self, d);
 				if (typeof nd === 'undefined') {
 					nd = d;
 				}
@@ -1631,8 +1648,8 @@ var Z80 = function() {
 					console.error(o.toString(16), d);
 					debugger;
 				}
-				this.prefix_bytes = 1;				
-				var nd = d.handler.call(self, d);	
+				this.prefix_bytes = 1;
+				var nd = d.handler.call(self, d);
 				if (typeof nd === 'undefined') {
 					nd = d;
 				}
@@ -1643,7 +1660,7 @@ var Z80 = function() {
 		,dd_fallthrough: { disasm: "DD FALL", c:0, s:0
 			,exec: function(i) {
 				var o = i.operands[0];
-				var d = self.opcode_descriptions.main[o];	
+				var d = self.opcode_descriptions.main[o];
 				if (d.handler === undefined) {
 					console.error(o.toString(16), d);
 					return;
@@ -1655,13 +1672,13 @@ var Z80 = function() {
 		,fd_fallthrough: { disasm: "FD FALL", c:0, s:0
 			,exec: function(i) {
 				var o = i.operands[0];
-				var d = self.opcode_descriptions.main[o];	
+				var d = self.opcode_descriptions.main[o];
 				if (d.handler === undefined) {
 					console.error(o.toString(16), d);
 					return;
 				}
 				d.handler.call(self, d);
-				return d;								
+				return d;
 			}
 		}
 		,ddcb_prefix: {
@@ -1685,8 +1702,8 @@ var Z80 = function() {
 			,c: 4
 			,s: 4
 			,exec: function(i) {
-				self.prefix_bytes = 0;			
-				self.displacement = u2s8(self.mmu.read8(this.readPC()+2));				
+				self.prefix_bytes = 0;
+				self.displacement = u2s8(self.mmu.read8(this.readPC()+2));
 				var o = self.mmu.read8(this.readPC()+3);
 				var d = self.opcode_descriptions.fdcb[o];
 				if (d.handler === undefined) {
@@ -1722,7 +1739,7 @@ var Z80 = function() {
 		} }
 		,ld_mi_a: { disasm: "LD (%iw),A", c:7, s:3, exec: function(i) {
 			var a = self.readA();
-			self.writeMEMPTR(a << 8);			
+			self.writeMEMPTR(a << 8);
 			self.mmu.write8(self.immediate16(), a);
 		} }
 
@@ -1731,32 +1748,32 @@ var Z80 = function() {
 			var address = i.operand_hook[0].read(i.operands[0]);
 			self.writeMEMPTR((a << 8) | ((address+1) & 0xff));
 			self.mmu.write8(address, a);
-		} }		
+		} }
 
 		,ld_a_mbc: { disasm: "LD A,(BC)", c:7, s:1, exec: function(i) {
-			var r = self.readBC();			
+			var r = self.readBC();
 			self.writeA(self.mmu.read8(r));
 			self.writeMEMPTR(r + 1);
 		} }
 		,ld_a_mde: { disasm: "LD A,(DE)", c:7, s:1, exec: function(i) {
-			var r = self.readDE();					
+			var r = self.readDE();
 			self.writeA(self.mmu.read8(r));
 			self.writeMEMPTR(r + 1);
 		} }
 
 		// main group HL <-> memory-immediate loads
 		,ld_hl_mi: { disasm: "LD HL,(%iw)", c:16, s:3, exec: function(i) {
-			var r = self.immediate16();			
+			var r = self.immediate16();
 			self.writeHL(self.mmu.read16(r));
 			self.writeMEMPTR(r + 1);
 		} }
 		,ld_ix_mi: { disasm: "LD IX,(%iw)", c:20, s:3, exec: function(i) {
-			var r = self.immediate16();			
+			var r = self.immediate16();
 			self.writeIX(self.mmu.read16(r));
 			self.writeMEMPTR(r + 1);
 		} }
 		,ld_iy_mi: { disasm: "LD IY,(%iw)", c:20, s:3, exec: function(i) {
-			var r = self.immediate16();			
+			var r = self.immediate16();
 			self.writeIY(self.mmu.read16(r));
 			self.writeMEMPTR(r + 1);
 		} }
@@ -1843,7 +1860,7 @@ var Z80 = function() {
 			);
 		} }
 		,ld_miy_ib: { disasm: "LD (IY+%d),%ib", c:15, s:3, exec: function(i) {
-			var d = u2s8(self.mmu.read8(self.readPC()+2));		
+			var d = u2s8(self.mmu.read8(self.readPC()+2));
 			self.mmu.write8(
 				self.readIY() + d
 				,self.mmu.read8(self.readPC()+3)
@@ -1862,6 +1879,14 @@ var Z80 = function() {
 			if (self.r.IFF2) { self.setFP(); } else { self.resetFP(); }
 		} }
 
+		,ld_r_a: { disasm: "LD R,A", c:5, s:2, exec: function(i) {
+			self.writeR(self.readA());
+		} }
+		,ld_a_r: { disasm: "LD A,R", c:5, s:2, exec: function(i) {
+			self.writeA(self.readR());
+		} }
+
+
 		// 8-bit increment/decrement
 		,inc_ry: { disasm: "INC %0", c:4, s:1, exec: function(i) {
 			var s = i.operand_hook[0].read(i.operands[0]);
@@ -1871,7 +1896,7 @@ var Z80 = function() {
 			if (!r) { self.setFZ(); } else { self.resetFZ(); }
 			if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
 			if ((r & 0xf) == 0) { self.setFH(); } else { self.resetFH(); }
-			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }			
+			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }
 			if (s == 0x7f) { self.setFV(); } else { self.resetFV(); }
 			self.resetFN();
 			// carry unchanged
@@ -1882,11 +1907,11 @@ var Z80 = function() {
 			var s = i.operand_hook[0].read(i.operands[0]);
 			var r = (s - 1) & 0xff;
 
-			if (r & 0x80) { self.setFS(); } else { self.resetFS(); }			
+			if (r & 0x80) { self.setFS(); } else { self.resetFS(); }
 			if (!r) { self.setFZ(); } else { self.resetFZ(); }
 			if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
 			if ((r & 0xf) == 0xf) { self.setFH(); } else { self.resetFH(); }
-			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }			
+			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }
 			if (s == 0x7f) { self.setFV(); } else { self.resetFV(); }
 			self.setFN();
 			// carry unchanged
@@ -1910,23 +1935,23 @@ var Z80 = function() {
 		,jr: { disasm: "JR %d", c:12, s:2, exec: function(i) {
 			self.displacement = u2s8(self.immediate8());
 			var target = self.readPC() + self.displacement;
-			self.writeMEMPTR(target);			
+			self.writeMEMPTR(target);
 			self.writePC(target);
 		} }
 		,jr_ccy4: { disasm: "JR %0,%d", c:7, s:2, exec: function(i) {
 			self.displacement = u2s8(self.immediate8());
-			var target = self.readPC() + self.displacement;			
-			if (self.testCondition(i.operands[0])) {		
-				self.writeMEMPTR(target + 2);		
+			var target = self.readPC() + self.displacement;
+			if (self.testCondition(i.operands[0])) {
+				self.writeMEMPTR(target + 2);
 				self.writePC(target);
 			}
 		} }
 		,djnz: { disasm: "DJNZ %d", c:8, s:2, exec: function(i) {
 			self.writeB(self.readB() - 1);
 			self.displacement = u2s8(self.immediate8());
-			if (self.readB()) {				
+			if (self.readB()) {
 				var target = self.readPC() + self.displacement;
-				self.writeMEMPTR(target);			
+				self.writeMEMPTR(target);
 				self.writePC(target);
 			}
 		} }
@@ -1934,7 +1959,7 @@ var Z80 = function() {
 		// 16-bit absolute jump
 		,jp: { disasm: "JP %iw", c:10, s:3, exec: function(i) {
 			var target = self.immediate16();
-			self.writeMEMPTR(target);		
+			self.writeMEMPTR(target);
 			self.writePC(target - 3);
 		} }
 		,jp_ccy: { disasm: "JP %0,%iw", c:10, s:3, exec: function(i) {
@@ -1946,17 +1971,17 @@ var Z80 = function() {
 		} }
 		,jp_hl: { disasm: "JP (HL)", c:4, s:1, exec: function(i) {
 			var target = self.readHL();
-			self.writeMEMPTR(target);		
+			self.writeMEMPTR(target);
 			self.writePC(target - 1);
 		} }
 		,jp_ix: { disasm: "JP (IX)", c:4, s:1, exec: function(i) {
 			var target = self.readIX();
-			self.writeMEMPTR(target);		
+			self.writeMEMPTR(target);
 			self.writePC(target - 1);
 		} }
 		,jp_iy: { disasm: "JP (IY)", c:4, s:1, exec: function(i) {
 			var target = self.readIY();
-			self.writeMEMPTR(target);		
+			self.writeMEMPTR(target);
 			self.writePC(target - 1);
 		} }
 
@@ -1977,8 +2002,8 @@ var Z80 = function() {
 			var r = ((s >> 1) | ( s << 7)) & 0xff;
 			self.resetFH();
 			self.resetFN();
-			if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
 			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }
+			if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
 			if (s & 0x01) { self.setFC(); } else { self.resetFC(); }
 
 			self.writeA(r);
@@ -2004,7 +2029,7 @@ var Z80 = function() {
 			self.resetFN();
 			self.writeA(r);
 		} }
-	
+
 		,rld: { disasm: "RLD", c:18, s:1, exec: function(i) {
 			var shl = self.readHL();
 			self.writeMEMPTR(shl + 1);
@@ -2017,11 +2042,11 @@ var Z80 = function() {
 			// cite:1 says C is changed, cite:3 says it is not changed
 			//if (r & 0x80) { self.setFC(); } else { self.resetFC(); }
 			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
-			if (self.parity(r)) { self.setFP(); } else { self.resetFP(); }			
+			if (self.parity(r)) { self.setFP(); } else { self.resetFP(); }
 			self.resetFH();
 			self.resetFN();
-			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }			
 			if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
+			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }
 
 			self.mmu.write8(shl, dmhl);
 			self.writeA(r);
@@ -2035,11 +2060,11 @@ var Z80 = function() {
 
 			// cite:1 says C is changed, cite:3 says it is not changed
 			//if (r & 0x80) { self.setFC(); } else { self.resetFC(); }
-			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }			
+			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
 			if (self.parity(r)) { self.setFP(); } else { self.resetFP(); }
 			self.resetFH();
 			self.resetFN();
-			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }			
+			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }
 			if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
 
 			self.mmu.write8(shl, dmhl);
@@ -2069,7 +2094,7 @@ var Z80 = function() {
 			self.resetFH();
 			if (self.parity(r)) { self.setFP(); } else { self.resetFP(); }
 			self.resetFN();
-			if (s & 0x01) { self.setFC(); } else { self.resetFC(); }			
+			if (s & 0x01) { self.setFC(); } else { self.resetFC(); }
 
 			i.operand_hook[0].write(i.operands[0], r);
 		} }
@@ -2151,25 +2176,23 @@ var Z80 = function() {
 
 			i.operand_hook[0].write(i.operands[0], r);
 		} }
-
 		,daa: { disasm: "DAA", c:4, s:1, exec: function(i) {
-
-			var tmpI = 0;
-			var tmpC = self.getFC();
+			var tmp_i = 0;
+			var tmp_c = self.getFC();
 			var r = self.readA();
 
-			if ((self.getFH()) || (r&0x0f) > 9) { tmpI = 6; }
-			if (tmpC != 0 || r > 0x99) { tmpI |= 0x60; }
-			if (r > 0x99) { tmpC = 1; }
+			if ((self.getFH()) || (r&0x0f) > 9) { tmp_i = 6; }
+			if (tmp_c != 0 || r > 0x99) { tmp_i |= 0x60; }
+			if (r > 0x99) { tmp_c = 1; }
 
-			self.resetFC();  
+			self.resetFC();
 			if (self.getFN()) {
-				r = self.base_sbc8(r, tmpI);
+				r = self.base_sbc8(r, tmp_i);
 			} else {
-				r = self.base_adc8(r, tmpI);
+				r = self.base_adc8(r, tmp_i);
 			}
 
-			if (tmpC) { self.setFC(); } else { self.resetFC(); }
+			if (tmp_c) { self.setFC(); } else { self.resetFC(); }
 			self.writeA(r);
 			if (self.parity(r)) { self.setFP(); } else { self.resetFP(); }
 		} }
@@ -2186,7 +2209,7 @@ var Z80 = function() {
 		} }
 		,neg: { disasm: "NEG", c:4, s:1, exec: function(i) {
 			var s = self.readA();
-			var r = (0 - s) & 0xff;
+			var r = (256 - s) & 0xff;
 			if (r >= 0x80) { self.setFS(); } else { self.resetFS(); }
 			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
 			if (s == 0x80) { self.setFV(); } else { self.resetFV(); }
@@ -2197,24 +2220,24 @@ var Z80 = function() {
 		,neg_ed: { disasm: "NEG", c:4, s:2, exec: function(i) {
 			// same as NEG, but ED prefix
 			var s = self.readA();
-			var r = (0 - s) & 0xff;
+			var r = (256 - s) & 0xff;
 			if (r >= 0x80) { self.setFS(); } else { self.resetFS(); }
 			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
 			if (s == 0x80) { self.setFV(); } else { self.resetFV(); }
 			self.setFN();
 			if (s != 0) { self.setFC(); } else { self.resetFC(); }
 			self.writeA(r);
-		} }		
+		} }
 		,scf: { disasm: "SCF", c:4, s:1, exec: function(i) {
-			if (self.readA() & 0x20) { self.setF5(); }
+			if (self.readA() & 0x20) { self.setF5(); } else { self.resetF5(); }
 			self.resetFH();
-			if (self.readA() & 0x08) { self.setF3(); }
+			if (self.readA() & 0x08) { self.setF3(); } else { self.resetF3(); }
 			self.resetFN();
 			self.setFC();
 		} }
 		,ccf: { disasm: "CCF", c:4, s:1, exec: function(i) {
-			if (self.readA() & 0x20) { self.setF5(); }
-			if (self.readA() & 0x08) { self.setF3(); }
+			if (self.readA() & 0x20) { self.setF5(); } else { self.resetF5(); }
+			if (self.readA() & 0x08) { self.setF3(); } else { self.resetF3(); }
 			if (self.getFC()) {
 				self.setFH();
 				self.resetFC();
@@ -2224,24 +2247,21 @@ var Z80 = function() {
 			}
 			self.resetFN();
 		} }
-
 		,ex_af_af: { disasm: "EX AF,AF'", c:4, s:1, exec: function(i) {
 			var af = self.readAF();
 			var af2 = self.readAF2();
 			self.writeAF(af2);
 			self.writeAF2(af);
 		} }
-
 		,halt: { disasm: "HALT", c:4, s:1, exec: function(i) {
 			self.writePC(self.readPC()-1);
 		} }
-
 		,add_rz: { disasm: "ADD %0", c:4, s:1, exec: function(i) {
 			var d = self.readA();
 			var s = i.operand_hook[0].read(i.operands[0]);
 			self.resetFC();
 			self.writeA(self.base_adc8(d, s));
-			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)			
+			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)
 		} }
 		,add_ib: { disasm: "ADD %ib", c:4, s:2, exec: function(i) {
 			var d = self.readA();
@@ -2249,25 +2269,23 @@ var Z80 = function() {
 			self.resetFC();
 			self.writeA(self.base_adc8(d, s));
 		} }
-
 		,adc_rz: { disasm: "ADC %0", c:4, s:1, exec: function(i) {
 			var d = self.readA();
 			var s = i.operand_hook[0].read(i.operands[0]);
 			self.writeA(self.base_adc8(d, s));
-			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)			
+			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)
 		} }
 		,adc_ib: { disasm: "ADC %ib", c:4, s:2, exec: function(i) {
 			var d = self.readA();
 			var s = self.immediate8();
 			self.writeA(self.base_adc8(d, s));
 		} }
-
 		,sub_rz: { disasm: "SUB %0", c:4, s:1, exec: function(i) {
 			var d = self.readA();
 			var s = i.operand_hook[0].read(i.operands[0]);
 			self.resetFC();
 			self.writeA(self.base_sbc8(d, s));
-			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)			
+			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)
 		} }
 		,sub_ib: { disasm: "SUB %ib", c:4, s:2, exec: function(i) {
 			var d = self.readA();
@@ -2275,55 +2293,50 @@ var Z80 = function() {
 			self.resetFC();
 			self.writeA(self.base_sbc8(d, s));
 		} }
-
 		,sbc_rz: { disasm: "SBC %0", c:4, s:1, exec: function(i) {
 			var d = self.readA();
 			var s = i.operand_hook[0].read(i.operands[0]);
 			self.writeA(self.base_sbc8(d, s));
-			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)			
+			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)
 		} }
 		,sbc_ib: { disasm: "SBC %ib", c:4, s:2, exec: function(i) {
 			var d = self.readA();
 			var s = self.immediate8();
 			self.writeA(self.base_sbc8(d, s));
 		} }
-
 		,and_rz: { disasm: "AND %0", c:4, s:1, exec: function(i) {
 			var d = self.readA();
 			var s = i.operand_hook[0].read(i.operands[0]);
 			self.writeA(self.base_and8(d, s));
-			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)			
+			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)
 		} }
 		,and_ib: { disasm: "AND %ib", c:4, s:2, exec: function(i) {
 			var d = self.readA();
 			var s = self.immediate8();
 			self.writeA(self.base_and8(d, s));
 		} }
-
 		,or_rz: { disasm: "OR %0", c:4, s:1, exec: function(i) {
 			var d = self.readA();
 			var s = i.operand_hook[0].read(i.operands[0]);
 			self.writeA(self.base_or8(d, s));
-			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)			
+			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)
 		} }
 		,or_ib: { disasm: "OR %ib", c:4, s:2, exec: function(i) {
 			var d = self.readA();
 			var s = self.immediate8();
 			self.writeA(self.base_or8(d, s));
 		} }
-
 		,xor_rz: { disasm: "XOR %0", c:4, s:1, exec: function(i) {
 			var d = self.readA();
 			var s = i.operand_hook[0].read(i.operands[0]);
 			self.writeA(self.base_xor8(d, s));
-			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)			
+			if (i.operands[0] == 6) { self.clocks += 3; } // (HL)
 		} }
 		,xor_ib: { disasm: "XOR %ib", c:4, s:2, exec: function(i) {
 			var d = self.readA();
 			var s = self.immediate8();
 			self.writeA(self.base_xor8(d, s));
 		} }
-
 		,cp_rz: { disasm: "CP %0", c:4, s:1, exec: function(i) {
 			var d = self.readA();
 			var s = i.operand_hook[0].read(i.operands[0]);
@@ -2335,11 +2348,14 @@ var Z80 = function() {
 			var s = self.immediate8();
 			self.base_cp8(d, s);
 		} }
-		
 		,bit: { disasm: "BIT %0,%1", c:16, s:2, exec: function(i) {
 			var n = i.operands[0];
 			var n_mask = 1 << n;
 			var s = i.operand_hook[1].read(i.operands[1]);
+
+			if (typeof(g_foo) != 'undefined') {
+				console.log(i, n, n_mask, s);
+			}
 
 			if (s & (1 << n) & 0x80) { self.setFS(); } else { self.resetFS(); }
 			if (s & (1 << n)) {
@@ -2349,18 +2365,18 @@ var Z80 = function() {
 				self.setFZ();
 				self.setFP();
 			}
-			
+
 			if (s & 0x20) { self.setF5(); } else { self.resetF5(); }
-			if (s & 0x08) { self.setF3(); } else { self.resetF3(); }	
-			
-/*					
+			if (s & 0x08) { self.setF3(); } else { self.resetF3(); }
+
+/*
 			if (i.operands[1] == 6) {
 
 			} else {
 				if (self.readMEMPTR() & 0x2000) { self.setF5(); } else { self.resetF5(); }
 				if (self.readMEMPTR() & 0x0800) { self.setF3(); } else { self.resetF3(); }
 			}
-*/			
+*/
 			self.setFH();
 			self.resetFN();
 		} }
@@ -2376,20 +2392,19 @@ var Z80 = function() {
 			var r = s | n_mask;
 			i.operand_hook[1].write(i.operands[1], r);
 		} }
-
 		,add_hl_rp: { disasm: "ADD HL,%0", c:11, s:1, exec: function(i) {
 			var d = self.readHL();
 			var s = i.operand_hook[0].read(i.operands[0]);
-			var r = d + s;	
-			if (s & d & 0x0800) { self.setFH(); } else { self.resetFH(); }
+			var r = d + s;
+			if ((s & 0x07ff) + (d & 0x07ff) >= 0x0800) { self.setFH(); } else { self.resetFH(); }
 			self.resetFN();
-			if (r >= 0x10000) { self.setFC(); } else { self.resetFC(); }						
+			if (r >= 0x10000) { self.setFC(); } else { self.resetFC(); }
 			self.writeHL(r & 0xffff);
 		} }
 		,add_ix_rp: { disasm: "ADD IX,%0", c:11, s:1, exec: function(i) {
 			var s = i.operand_hook[0].read(i.operands[0]);
 			var d = self.readIX();
-			var r = s + d;			
+			var r = s + d;
 			self.writeMEMPTR(d + 1);
 			self.resetFN();
 			if (r >= 0x10000) { self.setFC(); } else { self.resetFC(); }
@@ -2398,40 +2413,42 @@ var Z80 = function() {
 		,add_iy_rp: { disasm: "ADD IY,%0", c:11, s:1, exec: function(i) {
 			var s = i.operand_hook[0].read(i.operands[0]);
 			var d = self.readIX();
-			var r = s + d;			
+			var r = s + d;
 			self.writeMEMPTR(d + 1);
 			self.resetFN();
 			if (r >= 0x10000) { self.setFC(); } else { self.resetFC(); }
 			self.writeIY(r);
-		} }					
+		} }
 
 		// call stack operations
 		,rst: { disasm: "RST %0", c:17, s:1, exec: function(i) {
 			self.writeSP(self.readSP()-2);
 			var ret_address = self.readPC() + 1;
 			self.mmu.write8(self.readSP() + 1, (ret_address >> 8) & 0xff);
-			self.mmu.write8(self.readSP(), ret_address & 0xff);	
+			self.mmu.write8(self.readSP(), ret_address & 0xff);
 			self.writePC(i.operands[0]*8 - 1);
 			self.writeMEMPTR(i.operands[0]*8);
 		} }
 		,call: { disasm: "CALL %iw", c:17, s:3, exec: function(i) {
-			var target = self.immediate16();			
+			var target = self.immediate16();
 			var ret_address = self.readPC() + 3;
 			self.writeSP(self.readSP() - 2);
-			// written high-byte first for some odd reason
+			// written high-byte first -
+			// visible to hardware but not software
 			self.mmu.write8(self.readSP() + 1, (ret_address >> 8) & 0xff);
-			self.mmu.write8(self.readSP(), ret_address & 0xff);				
+			self.mmu.write8(self.readSP(), ret_address & 0xff);
 			self.writePC(target - 3);
 		} }
 		,call_ccy: { disasm: "CALL %0,%iw", c:17, s:3, exec: function(i) {
-			var target = self.immediate16();	
+			var target = self.immediate16();
 			self.writeMEMPTR(target);
 			if (self.testCondition(i.operands[0])) {
 				var ret_address = self.readPC() + 3;
 				self.writeSP(self.readSP() - 2);
-				// written high-byte first for some odd reason				
+				// written high-byte first -
+				// visible to hardware but not software
 				self.mmu.write8(self.readSP() + 1, (ret_address >> 8) & 0xff);
-				self.mmu.write8(self.readSP(), ret_address & 0xff);				
+				self.mmu.write8(self.readSP(), ret_address & 0xff);
 				self.writePC(target - 3);
 			}
 		} }
@@ -2453,9 +2470,9 @@ var Z80 = function() {
 		} }
 		,ret_ccy: { disasm: "RET %0", c:5, s:1, exec: function(i) {
 			if (self.testCondition(i.operands[0])) {
-				var target = self.mmu.read16(self.readSP());		
+				var target = self.mmu.read16(self.readSP());
 				self.writePC(target - 1 - self.prefix_bytes);
-				self.writeSP(self.readSP() + 2);			
+				self.writeSP(self.readSP() + 2);
 				self.clocks += 6;
 			}
 		} }
@@ -2466,17 +2483,17 @@ var Z80 = function() {
 			// high-byte is written first
 			self.mmu.write8(self.readSP()-1, r >> 8);
 			self.mmu.write8(self.readSP()-2, r & 0xff);
-			self.writeSP(self.readSP()-2);				
+			self.writeSP(self.readSP()-2);
 		} }
 		,pop: { disasm: "POP %0", c:10, s:1, exec: function(i) {
 			i.operand_hook[0].write(i.operands[0], self.mmu.read16(self.readSP()));
 			self.writeSP(self.readSP()+2);
 		} }
 		,push_af: { disasm: "PUSH AF", c:11, s:1, exec: function(i) {
-			// high-byte is written first		
+			// high-byte is written first
 			self.mmu.write8(self.readSP()-1, self.readAF() >> 8);
 			self.mmu.write8(self.readSP()-2, self.readAF() & 0xff);
-			self.writeSP(self.readSP()-2);			
+			self.writeSP(self.readSP()-2);
 		} }
 		,pop_af: { disasm: "POP AF", c:10, s:1, exec: function(i) {
 			self.writeAF(self.mmu.read16(self.readSP()));
@@ -2487,26 +2504,26 @@ var Z80 = function() {
 		,in_a_ib: { disasm: "IN A,(%ib)", c:12, s:2, exec: function(i) {
 			var port = (self.readA() << 8) | (self.immediate8());
 			var r = self.io.read(port);
-			self.writeA(r);				
+			self.writeA(r);
 		} }
 		,in_ry_bc: { disasm: "IN %0,(C)", c:12, s:2, exec: function(i) {
 			var port = self.readBC();
 			var r = self.io.read(port);
-			
+
 			// don't write to (HL)
 			if (i.operands[0] != 6) {
 				i.operand_hook[0].write(i.operands[0], r);
 			}
-			
+
 			self.writeMEMPTR(self.readBC() + 1);
-						
+
 			if (r & 0x80) { self.setFS(); } else { self.resetFS(); }
 			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
 			if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
 			self.resetFH();
 			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }
-			if (self.parity(r)) { self.setFP(); } else { self.resetFP(); }				
-			self.resetFN();			
+			if (self.parity(r)) { self.setFP(); } else { self.resetFP(); }
+			self.resetFN();
 		} }
 
 		,out_ib_a: { disasm: "OUT (%ib),A", c:12, s:2, exec: function(i) {
@@ -2590,9 +2607,21 @@ var Z80 = function() {
 		,adc_hl_rp: { disasm: "ADC HL,%0", c:15, s:2, exec: function(i) {
 			var d = self.readHL();
 			var s = i.operand_hook[0].read(i.operands[0]);
-			var r = self.base_adc8(d & 0xff, s & 0xff);
-			r |= (self.base_adc8((d >> 8) & 0xff, (s >> 8) & 0xff) << 8) & 0xffff;
-			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }			
+			var c = !!self.getFC();
+			var n = s + d + c;
+			var r = n & 0xffff;
+
+			self.writeMEMPTR((d + 1) & 0xffff);
+
+			self.resetFS();
+			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
+			if ((r >> 8) & 0x20) { self.setF5(); } else { self.resetF5(); }
+			if ((s & 0x0fff) + (d & 0x0fff) + c >= 0x1000) { self.setFH(); } else { self.resetFH(); }
+			if ((r >> 8) & 0x08) { self.setF3(); } else { self.resetF3(); }
+			if ((s ^ ((~d) & 0xffff)) & (s ^ n) & 0x8000) { self.setFV(); } else { self.resetFV(); }
+			self.resetFN();
+			if (n > 0xffff) { self.setFC(); } else { self.resetFC(); }
+
 			self.writeHL(r);
 		} }
 		,sbc_hl_rp: { disasm: "SBC HL,%0", c:15, s:2, exec: function(i) {
@@ -2600,7 +2629,7 @@ var Z80 = function() {
 			var s = i.operand_hook[0].read(i.operands[0]);
 			var r = self.base_sbc8(d & 0xff, s & 0xff);
 			r |= (self.base_sbc8((d >> 8) & 0xff, (s >> 8) & 0xff) << 8) & 0xffff;
-			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }			
+			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
 			self.writeHL(r);
 		} }
 
@@ -2812,12 +2841,15 @@ var Z80 = function() {
 			,{ o:0x44, p:[this.operand_ry], i:self.i.neg_ed } // operand is ignored
 			,{ o:0x45, p:[this.operand_rp], i:self.i.retn } // operand is ignored
 			,{ o:0x4D, p:[this.operand_rp], i:self.i.reti } // operand is ignored
+
 			,{ o:0x47, p:[], i:self.i.ld_i_a }
+			,{ o:0x4f, p:[], i:self.i.ld_r_a }
 			,{ o:0x57, p:[], i:self.i.ld_a_i }
-			
+			,{ o:0x4f, p:[], i:self.i.ld_a_r }
+
 			// decimal rotates
 			,{ o:0x67, p:[], i:self.i.rrd }
-			,{ o:0x6f, p:[], i:self.i.rld }			
+			,{ o:0x6f, p:[], i:self.i.rld }
 
 			// interrupt mode (and duplicates)
 			,{ o:0x4E, p:[], i:self.i.im_0 }
@@ -2916,7 +2948,7 @@ var Z80 = function() {
 			,{ o:0x70, p:[this.operand_rz], i:self.i.ld_miy_rz }
 			// fix (IY+dd),(IY+dd)
 			,{ o:0x76, p:[], i:self.i.halt }
-			
+
 			,{ o:0xcb, p:[], i:self.i.fdcb_prefix }
 
 			// ALU with byte regs/(HL)
@@ -3136,34 +3168,34 @@ Z80.prototype = {
 		g_fuzz_log = "";
 		my_seed = seed;
 		console.log("fuzz", mode, seed, steps);
-		
+
 		self.reset();
-		
+
 		$('#fuzz-output').html('fuzzing');
-		
+
 		if (mode == 0) {
 			self.mmu = new FuzzRandomMemory();
-			self.io = new FuzzRandomIO();			
+			self.io = new FuzzRandomIO();
 			fuzzLog(self.fuzzState());
-		
+
 			for (var i=0; i < steps; i++) {
 				self.stepInstructions(1);
 				fuzzLog(self.fuzzState());
 			}
-		} else if (mode == 1) {		
-			g_fuzz_log_enable = false;			
+		} else if (mode == 1) {
+			g_fuzz_log_enable = false;
 			for (var i=0; i < seed; i++) {
 				self.stepInstructions(1);
-			}			
+			}
 
-			g_fuzz_log_enable = true;	
-			fuzzLog(self.fuzzState());				
+			g_fuzz_log_enable = true;
+			fuzzLog(self.fuzzState());
 			for (var i=0; i < steps; i++) {
 				self.stepInstructions(1);
 				fuzzLog(self.fuzzState());
 			}
 		}
-		
+
 		$.ajax({
 			url: "fuzz.php?mode=" + mode + "&seed=" + seed + "&steps=" + steps
 			,type: "post"
@@ -3171,10 +3203,10 @@ Z80.prototype = {
 			,success: function(response) {
 				var html = "<pre>" + response + "</pre>";
 				$('#fuzz-output').html(html);
-			}		
+			}
 		});
 
-	}	
+	}
 	,stepInstructions: function(count) {
 		var self = this;
 		while (count-- && !g_break) {
@@ -3183,22 +3215,22 @@ Z80.prototype = {
 			var o = self.mmu.read8(self.readPC());
 			this.immediate_address = self.readPC() + 1;
 			self.r_add = 1;
-			this.prefix_bytes = 0;			
+			this.prefix_bytes = 0;
 			var d = self.opcode_descriptions.main[o];
 			if (d.handler === undefined) {
 				console.error(d);
 				return;
 			}
-			
+
 			// execute handler and get real instruction (if prefixed)
 			var ad = d.handler.call(self, d);
-			
-			// not prefixed?		
+
+			// not prefixed?
 			if (typeof ad === 'undefined') {
 				// use the original handler
 				ad = d;
 			}
-			
+
 			this.writePC(this.readPC() + ad.size + this.prefix_bytes + this.displacement_skip);
 			self.writeR((self.readR()+self.r_add) & 0x7f);
 
@@ -3228,39 +3260,36 @@ Z80.prototype = {
 	,stepClocks: function(clocks_count) {
 		var self = this;
 		while (clocks_count >= 0) {
-			if (g_breakpoint) {
-				this.debug = 1;
+
+			if (self.readPC() == 0x123111) {
+				g_breakpoint = 1;
+				self.debug = 1;
 				return false;
 			}
-			
-		/*	
-			if (self.readPC() == 0x02b2) {
-				console.log(self.readA());
-			}			
-*/
+
 			self.displacement_skip = 0;
 
 			var o = self.mmu.read8(self.readPC());
 			this.immediate_address = self.readPC() + 1;
 			self.r_add = 1;
-			this.prefix_bytes = 0;			
+			this.prefix_bytes = 0;
 			var d = self.opcode_descriptions.main[o];
 			if (d.handler === undefined) {
 				console.error(d);
 				return;
 			}
-			
+
 			// execute handler and get real instruction (if prefixed)
 			var ad = d.handler.call(self, d);
-			
-			// not prefixed?		
+
+			// not prefixed?
 			if (typeof ad === 'undefined') {
 				// use the original handler
 				ad = d;
 			}
-			
+
 			this.writePC(this.readPC() + ad.size + this.prefix_bytes + this.displacement_skip);
-			self.writeR((self.readR()+self.r_add) & 0x7f);		
+			self.writeR((self.readR()+self.r_add) & 0x7f);
 
 			this.steps++;
 			this.clocks += d.clocks;
@@ -3439,10 +3468,10 @@ Z80.prototype = {
 	,readPC: function() { return this.r.PC; }
 	,readIX: function() { return this.r.IX; }
 	,readHX: function() { return this.r.IX >> 8; }
-	,readLX: function() { return this.r.IX & 0xff; }		
+	,readLX: function() { return this.r.IX & 0xff; }
 	,readIY: function() { return this.r.IY; }
 	,readHY: function() { return this.r.IY >> 8; }
-	,readLY: function() { return this.r.IY & 0xff; }	
+	,readLY: function() { return this.r.IY & 0xff; }
 	,readI: function(x) { return this.r.I; }
 	,readR: function(x) { return this.r.R; }
 	,readIM: function(x) { return this.r.IM; }
@@ -3558,7 +3587,7 @@ Z80.prototype = {
 			case 5 : /* PE */ r =  (this.getFP()); break;
 			case 6 : /*  P */ r = !(this.getFS()); break;
 			case 7 : /*  M */ r =  (this.getFS()); break;
-		}	
+		}
 		return !!r;
 	}
 
