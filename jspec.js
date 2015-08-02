@@ -43,15 +43,11 @@ z80tests.sna:
 
 
 buggy instructions :
-ld r,a
 
 add hl,hl (hl=0x0f10)-> f becomes b8 should be 98
 bit 0,(iy+2) (0x00) -> f becomes 0x55 0101 0101 should be 0x5d 0101 1101
 and n -> disasm
-adc a,0 (a=0xff) -> f becomes 0x01 should be 0x51
 
-
-ld a,0x10 ; rst 0x10 ; break at 2215 -> fuse differs
 */
 
 var g_test_rom = false;
@@ -2198,35 +2194,23 @@ var Z80 = function() {
 		} }
 		,cpl: { disasm: "CPL", c:4, s:1, exec: function(i) {
 			var s = self.readA();
-			var r = s ^ 0xff;
+			var r = (s ^ 0xff) & 0xff;
 
-			if (s & 0x20) { self.setF5(); } else { self.resetF5(); }
+			if (r & 0x20) { self.setF5(); } else { self.resetF5(); }
 			self.setFH();
-			if (s & 0x08) { self.setF3(); } else { self.resetF3(); }
+			if (r & 0x08) { self.setF3(); } else { self.resetF3(); }
 			self.setFN();
 
 			self.writeA(r);
 		} }
-		,neg: { disasm: "NEG", c:4, s:1, exec: function(i) {
-			var s = self.readA();
-			var r = (256 - s) & 0xff;
-			if (r >= 0x80) { self.setFS(); } else { self.resetFS(); }
-			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
-			if (s == 0x80) { self.setFV(); } else { self.resetFV(); }
-			self.setFN();
-			if (s != 0) { self.setFC(); } else { self.resetFC(); }
-			self.writeA(r);
+		,neg: { disasm: "NEG", c:8, s:1, exec: function(i) {
+			self.resetFC();
+			self.writeA(self.base_sbc8(0, self.readA()));
 		} }
-		,neg_ed: { disasm: "NEG", c:4, s:2, exec: function(i) {
+		,neg_ed: { disasm: "NEG", c:8, s:2, exec: function(i) {
 			// same as NEG, but ED prefix
-			var s = self.readA();
-			var r = (256 - s) & 0xff;
-			if (r >= 0x80) { self.setFS(); } else { self.resetFS(); }
-			if (r == 0) { self.setFZ(); } else { self.resetFZ(); }
-			if (s == 0x80) { self.setFV(); } else { self.resetFV(); }
-			self.setFN();
-			if (s != 0) { self.setFC(); } else { self.resetFC(); }
-			self.writeA(r);
+			self.resetFC();
+			self.writeA(self.base_sbc8(0, self.readA()));
 		} }
 		,scf: { disasm: "SCF", c:4, s:1, exec: function(i) {
 			if (self.readA() & 0x20) { self.setF5(); } else { self.resetF5(); }
